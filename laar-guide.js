@@ -1,12 +1,15 @@
 /*
- * Laar Guide v0.1 — the talking website guide for laardigital.com
+ * Laar Guide v0.2 — the talking website guide for laardigital.com
  *
  * One <script type="module"> tag before </body>:
  *   <script type="module" src="/assets/js/laar-guide/laar-guide.js"
  *           data-agent-id="agent_xxx"></script>
  *
- * With no data-agent-id (or data-demo="true") it runs a silent demo, so the
- * look and the tour can be approved before anything connects to ElevenLabs.
+ * v0.2: in voice mode there is no transcript on screen. A voice-reactive
+ * particle sphere shows the guide speaking and listening. Captions are off by
+ * default (CC button). Text mode shows messages, with audio tags removed.
+ *
+ * With no data-agent-id (or data-demo="true") it runs a silent demo.
  * The ElevenLabs SDK is only downloaded when a visitor taps a choice.
  */
 
@@ -28,7 +31,6 @@ const CFG = Object.assign(
 );
 
 /* ---------- where things are on the page ---------- */
-// The agent uses these ids. Each is found by id, data-guide, a selector, or its heading.
 const SECTIONS = {
   hero: { sel: "section.hero", name: "Strategy into motion" },
   problem: { h: "QUIET ONLINE", name: "Great in person. Quiet online." },
@@ -66,6 +68,7 @@ const store = {
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const isMobile = () => matchMedia("(max-width: 640px)").matches;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const stripTags = (s) => String(s).replace(/\[[a-z][a-z \-]{0,24}\]\s*/gi, "").trim();
 function track(action, detail = {}) {
   const payload = { action, ...detail };
   window.dispatchEvent(new CustomEvent("laar-guide", { detail: payload }));
@@ -109,7 +112,6 @@ const OPENINGS = {
 };
 
 /* ---------- client tools: the agent's hands on the page ---------- */
-// Names and parameters must match the tools set up in ElevenLabs exactly.
 let conv = null;
 const tools = {
   scrollToSection: ({ section_id }) => {
@@ -125,7 +127,7 @@ const tools = {
     if (path === location.pathname) return "The visitor is already on that page.";
     store.set("resume", { at: Date.now(), from: location.pathname });
     track("go_to_page", { path });
-    setTimeout(() => { location.href = path; }, 2200); // let the agent finish its sentence
+    setTimeout(() => { location.href = path; }, 2200);
     return `Opening ${path}. The conversation pauses while the page loads; the visitor can tap Continue there.`;
   },
   openBooking: () => {
@@ -152,7 +154,6 @@ const CSS_TEXT = `
 .orb{width:40px;height:40px;border-radius:50%;flex:none;position:relative;
   background:radial-gradient(circle at 35% 30%,#FFB38A 0%,var(--o) 45%,#B93A0A 100%);
   box-shadow:0 0 0 1px rgb(244 241 236 / .2),0 0 24px rgb(255 122 47 / .35)}
-.orb.lg{width:56px;height:56px}
 .orb.speaking{animation:pulse 1.1s ease-in-out infinite}
 .orb.listening{animation:breathe 2.4s ease-in-out infinite}
 .orb.connecting{animation:spin 1.2s linear infinite;background:conic-gradient(var(--o),rgb(255 122 47 / .15),var(--o))}
@@ -177,16 +178,26 @@ h2{font-size:19px;font-weight:800;letter-spacing:-.01em;line-height:1.2}
 .fine{font-size:12px;line-height:1.45;color:rgb(244 241 236 / .54);margin-top:12px}
 .fine a{color:rgb(244 241 236 / .76)}
 .live .status{font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:rgb(244 241 236 / .6)}
+.stage{position:relative;height:230px;margin:2px -8px 12px;border-radius:18px;overflow:hidden;
+  background:radial-gradient(120% 90% at 50% 55%,rgb(23 41 77 / .9) 0%,rgb(9 20 40 / .95) 70%)}
+.stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 .caps{min-height:72px;max-height:180px;overflow:auto;margin:6px 0 12px;font-size:15.5px;line-height:1.5}
 .caps p{margin-top:8px}
 .caps .you{color:rgb(244 241 236 / .6);font-size:14px}
 .caps .demo{color:var(--o);font-size:13px}
+.live.voice .top .orb{display:none}
+.live.voice .caps{display:none}
+.live.voice.cc .caps{display:block;min-height:0;max-height:96px;font-size:14px;margin-top:0}
+.live:not(.voice) .stage,.live:not(.voice) #cc,.live:not(.voice) #mute{display:none}
+.live.voice #msg,.live.voice .send{display:none}
 .row{display:flex;gap:8px;align-items:center}
+.live.voice .row{justify-content:center}
 input{flex:1;min-width:0;font-size:15px;padding:12px 16px;border-radius:999px;border:1px solid rgb(244 241 236 / .18);background:rgb(9 20 40 / .55);color:var(--b)}
 input::placeholder{color:rgb(244 241 236 / .45)}
-.ctl{flex:none;border:1px solid rgb(244 241 236 / .18);background:rgb(244 241 236 / .06);color:var(--b);height:44px;min-width:44px;padding:0 14px;border-radius:999px;font-size:13px;font-weight:700;cursor:pointer}
+.ctl{flex:none;border:1px solid rgb(244 241 236 / .18);background:rgb(244 241 236 / .06);color:var(--b);height:44px;min-width:44px;padding:0 16px;border-radius:999px;font-size:13px;font-weight:700;cursor:pointer}
 .ctl.send{background:rgb(244 241 236 / .14)}
-.ctl[aria-pressed="true"]{background:rgb(249 112 102 / .2);border-color:rgb(249 112 102 / .5)}
+.ctl[aria-pressed="true"]{background:rgb(244 241 236 / .18);border-color:rgb(244 241 236 / .4)}
+#mute[aria-pressed="true"]{background:rgb(249 112 102 / .2);border-color:rgb(249 112 102 / .5)}
 .book{margin-top:10px}
 .pill{display:flex;align-items:center;gap:10px;background:rgb(14 30 58 / .92);-webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px);
   border:1px solid rgb(244 241 236 / .16);color:var(--b);border-radius:999px;padding:8px 18px 8px 8px;font-size:15px;font-weight:700;cursor:pointer;
@@ -198,6 +209,7 @@ input::placeholder{color:rgb(244 241 236 / .45)}
   .wrap{right:12px;left:12px;bottom:12px;align-items:stretch}
   .card{width:auto;max-width:none}
   .pill{align-self:flex-end}
+  .stage{height:200px}
 }
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
 `;
@@ -223,14 +235,16 @@ root.innerHTML = `<style>${CSS_TEXT}</style>
   </section>
 
   <section class="card live" id="live" role="dialog" aria-label="Conversation with Laar's guide" hidden>
-    <div class="top"><div class="orb lg" id="orb" aria-hidden="true"></div>
-      <div><h2>Laar's guide</h2><p class="status" id="status">Connecting…</p></div>
+    <div class="top"><div class="orb" id="orb" aria-hidden="true"></div>
+      <div><h2>Laar's guide</h2><p class="status" id="status" aria-live="polite">Connecting…</p></div>
       <button class="x" data-act="end" aria-label="End the conversation">×</button></div>
+    <div class="stage" id="stage" aria-hidden="true"><canvas id="viz"></canvas></div>
     <div class="caps" id="caps" aria-live="polite"></div>
     <form class="row" id="form">
       <input id="msg" autocomplete="off" placeholder="Type a message" aria-label="Type a message">
       <button class="ctl send" type="submit">Send</button>
       <button class="ctl" type="button" id="mute" aria-pressed="false" aria-label="Mute microphone">Mute</button>
+      <button class="ctl" type="button" id="cc" aria-pressed="false" aria-label="Show captions">CC</button>
     </form>
     <button class="btn primary book" data-act="book">Book a call</button>
   </section>
@@ -245,15 +259,108 @@ let mode = "voice";
 
 function show(el) { el.hidden = false; requestAnimationFrame(() => el.classList.add("in")); }
 function hide(el) { el.classList.remove("in"); el.hidden = true; }
-function setStatus(text, orbState) { statusEl.textContent = text; orb.className = "orb lg " + (orbState || ""); }
+function setStatus(text, state) { statusEl.textContent = text; orb.className = "orb " + (state || ""); viz.state = state || "idle"; }
 function say(text, who = "agent") {
+  const clean = who === "agent" ? stripTags(text) : String(text);
+  if (!clean) return;
   const p = document.createElement("p");
   if (who === "user") p.className = "you";
   if (who === "demo") p.className = "demo";
-  p.textContent = who === "user" ? `You: ${text}` : text;
+  p.textContent = who === "user" ? `You: ${clean}` : clean;
   caps.appendChild(p);
   while (caps.children.length > 6) caps.firstChild.remove();
   caps.scrollTop = caps.scrollHeight;
+}
+
+/* ---------- the voice visual: a particle sphere that moves with the voice ---------- */
+const viz = { raf: 0, state: "idle", out: 0, inn: 0, t: 0, last: 0, pts: null };
+function buildPoints(n) {
+  const pts = [], g = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < n; i++) {
+    const y = 1 - (i / (n - 1)) * 2, r = Math.sqrt(1 - y * y), a = i * g;
+    pts.push([Math.cos(a) * r, y, Math.sin(a) * r, Math.random() * Math.PI * 2]);
+  }
+  return pts;
+}
+function startViz() {
+  if (viz.raf) return;
+  viz.pts = viz.pts || buildPoints(isMobile() ? 320 : 460);
+  viz.last = performance.now();
+  const frame = (now) => { drawViz(now); viz.raf = requestAnimationFrame(frame); };
+  viz.raf = requestAnimationFrame(frame);
+}
+function stopViz() { cancelAnimationFrame(viz.raf); viz.raf = 0; }
+function level(fn) { try { return Math.min(1, Math.max(0, fn() || 0)); } catch { return 0; } }
+function drawViz(now) {
+  const c = $("viz"); if (!c || live.hidden) return;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const w = c.clientWidth, h = c.clientHeight;
+  if (!w || !h) return;
+  if (c.width !== Math.round(w * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+  const ctx = c.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const dt = Math.min(0.05, (now - viz.last) / 1000); viz.last = now; viz.t += dt;
+  const t = viz.t;
+
+  // targets from the real audio, or a simulated voice in the demo
+  let out = 0, inn = 0;
+  if (conv && conv.getOutputVolume) { out = level(() => conv.getOutputVolume()); inn = level(() => conv.getInputVolume()); }
+  else if (viz.state === "speaking") out = 0.25 + 0.45 * Math.abs(Math.sin(t * 7.3)) * Math.abs(Math.sin(t * 2.1 + 1));
+  if (viz.state === "speaking") out = Math.max(out, 0.08);
+  viz.out += (Math.min(1, out * 1.6) - viz.out) * (out > viz.out ? 0.35 : 0.12);
+  viz.inn += (Math.min(1, inn * 1.8) - viz.inn) * 0.2;
+  const L = viz.out, I = viz.inn, connecting = viz.state === "connecting";
+
+  ctx.clearRect(0, 0, w, h);
+  const cx = w / 2, cy = h / 2, R = Math.min(w, h) * 0.3 * (1 + L * 0.22);
+
+  // glow behind the sphere
+  const glow = ctx.createRadialGradient(cx, cy, R * 0.1, cx, cy, R * 2.1);
+  glow.addColorStop(0, `rgba(255,122,47,${0.16 + L * 0.42})`);
+  glow.addColorStop(0.45, `rgba(255,122,47,${0.05 + L * 0.12})`);
+  glow.addColorStop(1, "rgba(255,122,47,0)");
+  ctx.fillStyle = glow; ctx.fillRect(0, 0, w, h);
+
+  // two thin orbit rings for depth
+  ctx.lineWidth = 1;
+  for (let k = 0; k < 2; k++) {
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(t * (k ? -0.18 : 0.12) + k * 1.1);
+    ctx.strokeStyle = `rgba(244,241,236,${0.08 + L * 0.12})`;
+    ctx.beginPath(); ctx.ellipse(0, 0, R * (1.45 + k * 0.22), R * (0.38 + k * 0.1), 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+
+  // the core
+  const core = ctx.createRadialGradient(cx - R * 0.2, cy - R * 0.25, 0, cx, cy, R * 0.9);
+  core.addColorStop(0, `rgba(255,179,138,${0.35 + L * 0.5})`);
+  core.addColorStop(0.5, `rgba(255,122,47,${0.18 + L * 0.35})`);
+  core.addColorStop(1, "rgba(255,122,47,0)");
+  ctx.fillStyle = core; ctx.beginPath(); ctx.arc(cx, cy, R * 0.9, 0, Math.PI * 2); ctx.fill();
+
+  // particles on a turning sphere, pushed outward by the voice
+  const spin = reduced ? 0 : t * (connecting ? 1.2 : 0.28 + L * 0.5);
+  const tilt = 0.42 + Math.sin(t * 0.3) * 0.12;
+  const cy1 = Math.cos(spin), sy1 = Math.sin(spin), cx1 = Math.cos(tilt), sx1 = Math.sin(tilt);
+  for (const p of viz.pts) {
+    // smooth, liquid deformation (coherent across the surface) plus a little sparkle
+    const wave = L * 0.26 * Math.sin(p[0] * 3.2 + t * 4.2) * Math.cos(p[1] * 2.7 - t * 3.1)
+      + L * 0.05 * Math.sin(p[3] * 3 + t * 6)
+      + I * 0.14 * Math.sin(p[2] * 4 + t * 3)
+      + (connecting ? Math.sin(p[3] + t * 6) * 0.05 : 0);
+    const d = 1 + wave;
+    const x = p[0] * d, y = p[1] * d, z = p[2] * d;
+    const x1 = x * cy1 - z * sy1, z1 = x * sy1 + z * cy1;
+    const y1 = y * cx1 - z1 * sx1, z2 = y * sx1 + z1 * cx1;
+    const persp = 2.6 / (2.6 + z2);
+    const px = cx + x1 * R * persp, py = cy + y1 * R * persp;
+    const depth = (z2 + 1.4) / 2.8;
+    const a = 0.12 + depth * (0.55 + L * 0.3);
+    const size = (0.7 + depth * 1.5 + L * 0.9) * persp;
+    const warm = Math.min(1, 0.35 + L * 1.2 + (p[3] > 4.6 ? 0.3 : 0));
+    const r = Math.round(244 + 11 * warm), gg = Math.round(241 - 119 * warm), b = Math.round(236 - 189 * warm);
+    ctx.fillStyle = `rgba(${r},${gg},${b},${a})`;
+    ctx.beginPath(); ctx.arc(px, py, size, 0, Math.PI * 2); ctx.fill();
+  }
 }
 
 root.addEventListener("click", (e) => {
@@ -273,6 +380,9 @@ root.addEventListener("click", (e) => {
   } else if (t.id === "mute" && conv && conv.setMicMuted) {
     const m = t.getAttribute("aria-pressed") !== "true";
     conv.setMicMuted(m); t.setAttribute("aria-pressed", String(m)); t.textContent = m ? "Unmute" : "Mute";
+  } else if (t.id === "cc") {
+    const on = !live.classList.contains("cc");
+    live.classList.toggle("cc", on); t.setAttribute("aria-pressed", String(on));
   }
 });
 root.addEventListener("keydown", (e) => {
@@ -294,11 +404,17 @@ function showPill(text) {
   show(pill);
 }
 
+function setLiveMode(m) {
+  live.classList.toggle("voice", m === "voice");
+  if (m === "voice") startViz(); else stopViz();
+}
+
 /* ---------- starting and ending ---------- */
 async function start(path) {
-  hide(welcome); hide(pill); show(live);
+  hide(welcome); hide(pill);
   caps.innerHTML = "";
-  $("mute").hidden = mode !== "voice";
+  show(live);
+  setLiveMode(mode);
   track("start", { path, mode });
   const page = document.title.split("|")[0].trim() || location.pathname;
   const opening = OPENINGS[path].replace("{page}", page);
@@ -307,12 +423,12 @@ async function start(path) {
 
   let useMode = mode;
   if (useMode === "voice") {
-    setStatus("Allow the microphone to talk", "connecting");
+    setStatus("Allow the microphone", "connecting");
     try {
       const s = await navigator.mediaDevices.getUserMedia({ audio: true });
       s.getTracks().forEach((t) => t.stop());
     } catch {
-      useMode = "text"; $("mute").hidden = true;
+      useMode = "text"; setLiveMode("text");
       say("No microphone? No problem. Type below and I'll answer here.", "demo");
     }
   }
@@ -322,6 +438,7 @@ async function start(path) {
     conv = await Conversation.startSession({
       agentId: CFG.agentId,
       textOnly: useMode === "text",
+      stripAudioTags: true,
       dynamicVariables: {
         path, opening, page_path: location.pathname, page_title: page, sections_here: sectionsHere(),
       },
@@ -333,7 +450,7 @@ async function start(path) {
       },
       onMessage: (p) => {
         const role = p.role || (p.source === "ai" ? "agent" : "user");
-        if (role === "user" && useMode === "text") return; // typed text is already shown
+        if (role === "user" && useMode === "text") return;
         say(p.message, role === "agent" ? "agent" : "user");
       },
       onError: (msg) => { console.warn("[laar-guide]", msg); },
@@ -341,6 +458,7 @@ async function start(path) {
     });
   } catch (err) {
     console.warn("[laar-guide]", err);
+    setLiveMode("text");
     setStatus("Couldn't connect", "");
     say("Sorry, I couldn't connect just now. You can still book a call below.", "demo");
     track("error", { message: String(err && err.message || err) });
@@ -352,6 +470,7 @@ async function end() {
   track("end");
   const c = conv; conv = null;
   if (c) { try { await c.endSession(); } catch {} }
+  stopViz();
   hide(live); showPill();
 }
 
@@ -398,7 +517,6 @@ function boot() {
   if (CFG.skipPaths.includes(location.pathname)) return;
   if (store.get("resume")) { showPill("Continue with the guide"); pill.classList.add("nudge"); return; }
   if (store.get("dismissed") || isMobile()) {
-    // Phones: never pop a card over the page. Show the small pill instead.
     setTimeout(() => { showPill(); pill.classList.add("nudge"); }, CFG.autoOpenMs);
     return;
   }
