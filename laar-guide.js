@@ -5,8 +5,8 @@
  *   <script type="module" src="/assets/js/laar-guide/laar-guide.js"
  *           data-agent-id="agent_xxx"></script>
  *
- * v0.2: in voice mode there is no transcript on screen. A voice-reactive
- * particle sphere shows the guide speaking and listening. Captions are off by
+ * v0.2: in voice mode there is no transcript on screen. A voice-reactive scene
+ * (sphere, chess or word puzzle) shows the guide speaking and listening. Captions are off by
  * default (CC button). Text mode shows messages, with audio tags removed.
  *
  * With no data-agent-id (or data-demo="true") it runs a silent demo.
@@ -26,6 +26,8 @@ const CFG = Object.assign(
     pages: ["/", "/how-it-works/", "/plans/", "/who-we-serve/", "/about/", "/contact/", "/faq/"],
     noNav: data.noNav === "true",       // test sites with only one page
     sdkUrl: data.sdkUrl || "",          // load the ElevenLabs SDK from a CDN instead of /chunks
+    visual: new URLSearchParams(location.search).get("visual") || data.visual || "sphere", // sphere | chess | puzzle
+    visualPicker: data.visualPicker === "true", // test sites: show a scene switcher on the stage
   },
   window.LAAR_GUIDE || {}
 );
@@ -130,6 +132,12 @@ const tools = {
     setTimeout(() => { location.href = path; }, 2200);
     return `Opening ${path}. The conversation pauses while the page loads; the visitor can tap Continue there.`;
   },
+  spellName: ({ text }) => {
+    const clean = String(text || "").replace(/[^A-Za-z0-9& ]/g, "").trim().slice(0, 24);
+    if (!clean) return "Nothing to spell.";
+    puzzle.word = clean; setScene("puzzle"); track("spell_name");
+    return `Spelling "${clean}" on screen.`;
+  },
   openBooking: () => {
     window.open(CFG.bookingUrl, "_blank", "noopener");
     track("booking_opened");
@@ -181,6 +189,9 @@ h2{font-size:19px;font-weight:800;letter-spacing:-.01em;line-height:1.2}
 .stage{position:relative;height:230px;margin:2px -8px 12px;border-radius:18px;overflow:hidden;
   background:radial-gradient(120% 90% at 50% 55%,rgb(23 41 77 / .9) 0%,rgb(9 20 40 / .95) 70%)}
 .stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.pick{position:absolute;top:8px;left:8px;right:8px;display:flex;justify-content:center;gap:4px;z-index:2}
+.pick button{border:1px solid rgb(244 241 236 / .18);background:rgb(9 20 40 / .6);color:rgb(244 241 236 / .7);font-size:11px;font-weight:700;letter-spacing:.06em;padding:5px 10px;border-radius:999px;cursor:pointer}
+.pick button[aria-pressed="true"]{background:rgb(244 241 236 / .9);color:var(--n);border-color:transparent}
 .caps{min-height:72px;max-height:180px;overflow:auto;margin:6px 0 12px;font-size:15.5px;line-height:1.5}
 .caps p{margin-top:8px}
 .caps .you{color:rgb(244 241 236 / .6);font-size:14px}
@@ -238,7 +249,10 @@ root.innerHTML = `<style>${CSS_TEXT}</style>
     <div class="top"><div class="orb" id="orb" aria-hidden="true"></div>
       <div><h2>Laar's guide</h2><p class="status" id="status" aria-live="polite">Connecting…</p></div>
       <button class="x" data-act="end" aria-label="End the conversation">×</button></div>
-    <div class="stage" id="stage" aria-hidden="true"><canvas id="viz"></canvas></div>
+    <div class="stage" id="stage"><canvas id="viz" aria-hidden="true"></canvas>
+      <div class="pick" id="pick" role="group" aria-label="Choose a scene" hidden>
+        <button data-scene="sphere">Sphere</button><button data-scene="chess">Chess</button><button data-scene="puzzle">Puzzle</button>
+      </div></div>
     <div class="caps" id="caps" aria-live="polite"></div>
     <form class="row" id="form">
       <input id="msg" autocomplete="off" placeholder="Type a message" aria-label="Type a message">
@@ -272,8 +286,10 @@ function say(text, who = "agent") {
   caps.scrollTop = caps.scrollHeight;
 }
 
-/* ---------- the voice visual: a particle sphere that moves with the voice ---------- */
-const viz = { raf: 0, state: "idle", out: 0, inn: 0, t: 0, last: 0, pts: null };
+/* ---------- the voice visual: scenes that move with the voice ---------- */
+// sphere: particle sphere · chess: the "Immortal Game" (Anderssen v Kieseritzky, London 1851) replays as the guide speaks
+// puzzle: letter tiles that solve themselves into LAAR DIGITAL (or the visitor's business name) as the guide speaks
+const viz = { raf: 0, state: "idle", out: 0, inn: 0, t: 0, last: 0, pts: null, scene: CFG.visual };
 function buildPoints(n) {
   const pts = [], g = Math.PI * (3 - Math.sqrt(5));
   for (let i = 0; i < n; i++) {
@@ -284,13 +300,19 @@ function buildPoints(n) {
 }
 function startViz() {
   if (viz.raf) return;
-  viz.pts = viz.pts || buildPoints(isMobile() ? 320 : 460);
   viz.last = performance.now();
   const frame = (now) => { drawViz(now); viz.raf = requestAnimationFrame(frame); };
   viz.raf = requestAnimationFrame(frame);
 }
 function stopViz() { cancelAnimationFrame(viz.raf); viz.raf = 0; }
+function setScene(s) {
+  viz.scene = ["sphere", "chess", "puzzle"].includes(s) ? s : "sphere";
+  chess.board = null; puzzle.tiles = null;
+  root.querySelectorAll("[data-scene]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.scene === viz.scene)));
+}
 function level(fn) { try { return Math.min(1, Math.max(0, fn() || 0)); } catch { return 0; } }
+const clamp01 = (x) => Math.max(0, Math.min(1, x));
+const ease = (x) => { x = clamp01(x); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
 function drawViz(now) {
   const c = $("viz"); if (!c || live.hidden) return;
   const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -302,26 +324,35 @@ function drawViz(now) {
   const dt = Math.min(0.05, (now - viz.last) / 1000); viz.last = now; viz.t += dt;
   const t = viz.t;
 
-  // targets from the real audio, or a simulated voice in the demo
+  // voice levels from the real audio, or a simulated voice in the demo
   let out = 0, inn = 0;
   if (conv && conv.getOutputVolume) { out = level(() => conv.getOutputVolume()); inn = level(() => conv.getInputVolume()); }
   else if (viz.state === "speaking") out = 0.25 + 0.45 * Math.abs(Math.sin(t * 7.3)) * Math.abs(Math.sin(t * 2.1 + 1));
   if (viz.state === "speaking") out = Math.max(out, 0.08);
   viz.out += (Math.min(1, out * 1.6) - viz.out) * (out > viz.out ? 0.35 : 0.12);
   viz.inn += (Math.min(1, inn * 1.8) - viz.inn) * 0.2;
-  const L = viz.out, I = viz.inn, connecting = viz.state === "connecting";
 
   ctx.clearRect(0, 0, w, h);
-  const cx = w / 2, cy = h / 2, R = Math.min(w, h) * 0.3 * (1 + L * 0.22);
+  const args = [ctx, w, h, viz.out, viz.inn, t, dt];
+  if (viz.scene === "chess") drawChess(...args);
+  else if (viz.scene === "puzzle") drawPuzzle(...args);
+  else drawSphere(...args);
+}
 
-  // glow behind the sphere
+function glowAt(ctx, w, h, cx, cy, R, L) {
   const glow = ctx.createRadialGradient(cx, cy, R * 0.1, cx, cy, R * 2.1);
-  glow.addColorStop(0, `rgba(255,122,47,${0.16 + L * 0.42})`);
-  glow.addColorStop(0.45, `rgba(255,122,47,${0.05 + L * 0.12})`);
+  glow.addColorStop(0, `rgba(255,122,47,${0.14 + L * 0.4})`);
+  glow.addColorStop(0.45, `rgba(255,122,47,${0.04 + L * 0.1})`);
   glow.addColorStop(1, "rgba(255,122,47,0)");
   ctx.fillStyle = glow; ctx.fillRect(0, 0, w, h);
+}
 
-  // two thin orbit rings for depth
+/* sphere */
+function drawSphere(ctx, w, h, L, I, t) {
+  viz.pts = viz.pts || buildPoints(isMobile() ? 320 : 460);
+  const connecting = viz.state === "connecting";
+  const cx = w / 2, cy = h / 2, R = Math.min(w, h) * 0.3 * (1 + L * 0.22);
+  glowAt(ctx, w, h, cx, cy, R, L);
   ctx.lineWidth = 1;
   for (let k = 0; k < 2; k++) {
     ctx.save(); ctx.translate(cx, cy); ctx.rotate(t * (k ? -0.18 : 0.12) + k * 1.1);
@@ -329,20 +360,15 @@ function drawViz(now) {
     ctx.beginPath(); ctx.ellipse(0, 0, R * (1.45 + k * 0.22), R * (0.38 + k * 0.1), 0, 0, Math.PI * 2); ctx.stroke();
     ctx.restore();
   }
-
-  // the core
   const core = ctx.createRadialGradient(cx - R * 0.2, cy - R * 0.25, 0, cx, cy, R * 0.9);
   core.addColorStop(0, `rgba(255,179,138,${0.35 + L * 0.5})`);
   core.addColorStop(0.5, `rgba(255,122,47,${0.18 + L * 0.35})`);
   core.addColorStop(1, "rgba(255,122,47,0)");
   ctx.fillStyle = core; ctx.beginPath(); ctx.arc(cx, cy, R * 0.9, 0, Math.PI * 2); ctx.fill();
-
-  // particles on a turning sphere, pushed outward by the voice
   const spin = reduced ? 0 : t * (connecting ? 1.2 : 0.28 + L * 0.5);
   const tilt = 0.42 + Math.sin(t * 0.3) * 0.12;
   const cy1 = Math.cos(spin), sy1 = Math.sin(spin), cx1 = Math.cos(tilt), sx1 = Math.sin(tilt);
   for (const p of viz.pts) {
-    // smooth, liquid deformation (coherent across the surface) plus a little sparkle
     const wave = L * 0.26 * Math.sin(p[0] * 3.2 + t * 4.2) * Math.cos(p[1] * 2.7 - t * 3.1)
       + L * 0.05 * Math.sin(p[3] * 3 + t * 6)
       + I * 0.14 * Math.sin(p[2] * 4 + t * 3)
@@ -363,9 +389,170 @@ function drawViz(now) {
   }
 }
 
+/* chess: the Immortal Game, one move per beat while the guide speaks */
+const IMMORTAL = "e2e4 e7e5 f2f4 e5f4 f1c4 d8h4 e1f1 b7b5 c4b5 g8f6 g1f3 h4h6 d2d3 f6h5 f3h4 h6g5 h4f5 c7c6 g2g4 h5f6 h1g1 c6b5 h2h4 g5g6 h4h5 g6g5 d1f3 f6g8 c1f4 g5f6 b1c3 f8c5 c3d5 f6b2 f4d6 c5g1 e4e5 b2a1 f1e2 b8a6 f5g7 e8d8 f3f6 g8f6 d6e7".split(" ");
+const GLYPH = { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
+const chess = { board: null, i: 0, anim: null, last: null, wait: 0.6, hold: 0 };
+function chessReset() {
+  const b = {};
+  "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR".split("/").forEach((row, r) => {
+    let f = 0;
+    for (const ch of row) { if (/\d/.test(ch)) f += +ch; else { b["abcdefgh"[f] + (8 - r)] = ch; f++; } }
+  });
+  Object.assign(chess, { board: b, i: 0, anim: null, last: null, wait: 0.6, hold: 0 });
+}
+const sqXZ = (sq) => ["abcdefgh".indexOf(sq[0]) - 3.5, +sq[1] - 4.5];
+function drawChess(ctx, w, h, L, I, t, dt) {
+  if (!chess.board) chessReset();
+  const P = { cx: w / 2, cy: h * 0.57, S: Math.min(w / 12.5, h / 7.4), yaw: reduced ? 0 : Math.sin(t * 0.15) * 0.32, pitch: 0.98, D: 13 };
+  const cs = Math.cos(P.yaw), sn = Math.sin(P.yaw), cp = Math.cos(P.pitch), sp = Math.sin(P.pitch);
+  const proj = (x, y, z) => {
+    const x1 = x * cs - z * sn, z1 = x * sn + z * cs;
+    const yy = y * cp + z1 * sp, zc = z1 * cp - y * sp, f = P.D / (P.D + zc);
+    return [P.cx + x1 * P.S * f, P.cy - yy * P.S * f, zc, f];
+  };
+  glowAt(ctx, w, h, P.cx, P.cy, P.S * 3, L * 0.8);
+
+  // moves: one per beat while speaking; the game loops after mate
+  if (chess.hold > 0) { chess.hold -= dt; if (chess.hold <= 0) chessReset(); }
+  else if (chess.anim) {
+    chess.anim.k += dt / 0.6;
+    if (chess.anim.k >= 1) {
+      const { from, to } = chess.anim;
+      chess.board[to] = chess.board[from]; delete chess.board[from];
+      chess.last = [from, to]; chess.anim = null; chess.i++;
+      chess.wait = 0.9 - L * 0.4;
+      if (chess.i >= IMMORTAL.length) chess.hold = 4;
+    }
+  } else if (viz.state === "speaking") {
+    chess.wait -= dt;
+    if (chess.wait <= 0) { const m = IMMORTAL[chess.i]; chess.anim = { from: m.slice(0, 2), to: m.slice(2, 4), k: 0 }; }
+  }
+
+  // board
+  const sqs = [];
+  for (let f = 0; f < 8; f++) for (let r = 0; r < 8; r++) {
+    const x = f - 3.5, z = r - 3.5;
+    const pts = [[x - 0.5, z - 0.5], [x + 0.5, z - 0.5], [x + 0.5, z + 0.5], [x - 0.5, z + 0.5]].map(([a, b]) => proj(a, 0, b));
+    sqs.push({ f, r, pts, zc: proj(x, 0, z)[2], name: "abcdefgh"[f] + (r + 1) });
+  }
+  sqs.sort((a, b) => b.zc - a.zc);
+  const edge = [[-4, -4], [4, -4], [4, 4], [-4, 4]].map(([a, b]) => proj(a, 0, b));
+  ctx.fillStyle = "rgba(244,241,236,.10)";
+  ctx.beginPath(); edge.forEach(([x, y], k) => (k ? ctx.lineTo(x, y + 5) : ctx.moveTo(x, y + 5))); ctx.closePath(); ctx.fill();
+  const mated = chess.hold > 0;
+  for (const s of sqs) {
+    const light = (s.f + s.r) % 2 === 1;
+    let col = light ? "rgba(74,96,140,.95)" : "rgba(23,41,77,.98)";
+    if (chess.last && chess.last.includes(s.name)) col = light ? "rgba(255,146,86,.75)" : "rgba(255,122,47,.6)";
+    if (mated && chess.board[s.name] === "k") col = `rgba(255,122,47,${0.6 + 0.3 * Math.sin(t * 6)})`;
+    ctx.fillStyle = col;
+    ctx.beginPath(); s.pts.forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.fill();
+  }
+  ctx.strokeStyle = "rgba(244,241,236,.25)"; ctx.lineWidth = 1;
+  ctx.beginPath(); edge.forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.stroke();
+
+  // pieces, back to front
+  const pieces = [];
+  for (const [sq, pc] of Object.entries(chess.board)) {
+    if (chess.anim && sq === chess.anim.from) continue;
+    const fade = chess.anim && sq === chess.anim.to ? 1 - ease(chess.anim.k) : 1;
+    const [x, z] = sqXZ(sq); pieces.push({ pc, x, z, y: 0, a: fade });
+  }
+  if (chess.anim) {
+    const k = ease(chess.anim.k), [x0, z0] = sqXZ(chess.anim.from), [x1, z1] = sqXZ(chess.anim.to);
+    pieces.push({ pc: chess.board[chess.anim.from], x: x0 + (x1 - x0) * k, z: z0 + (z1 - z0) * k, y: Math.sin(Math.PI * k) * 0.9, a: 1 });
+  }
+  pieces.forEach((p) => { p.pr = proj(p.x, p.y, p.z); p.base = proj(p.x, 0, p.z); });
+  pieces.sort((a, b) => b.pr[2] - a.pr[2]);
+  ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+  for (const p of pieces) {
+    if (!p.pc) continue;
+    const size = P.S * p.pr[3] * 1.05, white = p.pc === p.pc.toUpperCase();
+    ctx.globalAlpha = p.a;
+    ctx.fillStyle = "rgba(0,0,0,.35)";
+    ctx.beginPath(); ctx.ellipse(p.base[0], p.base[1], size * 0.28, size * 0.1, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.font = `${Math.round(size)}px "Segoe UI Symbol","Noto Sans Symbols 2","Apple Symbols",serif`;
+    ctx.lineWidth = 2; ctx.strokeStyle = "rgba(9,20,40,.9)";
+    const g = GLYPH[p.pc.toLowerCase()] + "︎", y = p.pr[1] + size * 0.12;
+    ctx.strokeText(g, p.pr[0], y);
+    ctx.fillStyle = white ? "#F4F1EC" : "#FF7A2F";
+    ctx.fillText(g, p.pr[0], y);
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* puzzle: scrambled tiles that solve into a name while the guide speaks */
+const puzzle = { word: "LAAR DIGITAL", p: 0, tiles: null, hold: 0, w: 0 };
+function puzzleSetup(w, h) {
+  const words = puzzle.word.toUpperCase().split(/\s+/).filter(Boolean).slice(0, 4);
+  const lines = []; let cur = "";
+  for (const wd of words) { if (cur && (cur + " " + wd).length > 8) { lines.push(cur); cur = wd; } else cur = cur ? cur + " " + wd : wd; }
+  if (cur) lines.push(cur);
+  const maxLen = Math.max(...lines.map((l) => l.length));
+  const gap = 6, T = Math.min(38, (w - 40 - gap * (maxLen - 1)) / maxLen, (h - 70) / lines.length - gap);
+  const tiles = [];
+  lines.forEach((line, li) => {
+    const lw = line.length * T + (line.length - 1) * gap, x0 = (w - lw) / 2;
+    const y0 = (h - (lines.length * T + (lines.length - 1) * gap)) / 2 - 8 + li * (T + gap);
+    [...line].forEach((ch, k) => {
+      if (ch === " ") return;
+      tiles.push({ ch, tx: x0 + k * (T + gap), ty: y0, sx: 14 + Math.random() * (w - T - 28), sy: 14 + Math.random() * (h - T - 28),
+        rot: (Math.random() - 0.5) * 1.6, ph: Math.random() * 6.28, lockedAt: -1 });
+    });
+  });
+  const order = tiles.map((_, i) => i).sort(() => Math.random() - 0.5);
+  order.forEach((ti, k) => (tiles[ti].order = k));
+  Object.assign(puzzle, { tiles, T, p: 0, hold: 0, w });
+}
+function roundRect(ctx, x, y, s, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + s, y, x + s, y + s, r); ctx.arcTo(x + s, y + s, x, y + s, r);
+  ctx.arcTo(x, y + s, x, y, r); ctx.arcTo(x, y, x + s, y, r); ctx.closePath();
+}
+function drawPuzzle(ctx, w, h, L, I, t, dt) {
+  if (!puzzle.tiles || puzzle.w !== w) puzzleSetup(w, h);
+  const N = puzzle.tiles.length, T = puzzle.T;
+  glowAt(ctx, w, h, w / 2, h / 2, T * 2.5, L * 0.7);
+  if (puzzle.hold > 0) { puzzle.hold -= dt; if (puzzle.hold <= 0) puzzleSetup(w, h); }
+  else {
+    puzzle.p += dt * (viz.state === "speaking" ? 0.05 + L * 0.22 : 0.008);
+    if (puzzle.p >= 1) { puzzle.p = 1; puzzle.hold = 5; }
+  }
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (const tl of puzzle.tiles) {
+    const k = ease(clamp01((puzzle.p * (N + 2) - tl.order) / 2));
+    if (k >= 1 && tl.lockedAt < 0) tl.lockedAt = t;
+    const bob = (1 - k) * 6;
+    const x = tl.sx + (tl.tx - tl.sx) * k + Math.sin(t * 1.3 + tl.ph) * bob;
+    const y = tl.sy + (tl.ty - tl.sy) * k + Math.cos(t * 1.1 + tl.ph) * bob;
+    const rot = tl.rot * (1 - k);
+    ctx.save(); ctx.translate(x + T / 2, y + T / 2); ctx.rotate(rot);
+    const flash = tl.lockedAt >= 0 ? clamp01(1 - (t - tl.lockedAt) / 0.5) : 0;
+    if (flash > 0) { ctx.shadowColor = `rgba(255,122,47,${flash})`; ctx.shadowBlur = 22 * flash; }
+    roundRect(ctx, -T / 2, -T / 2, T, Math.min(9, T * 0.24));
+    if (k >= 1) { ctx.fillStyle = flash > 0 ? "#FF9256" : "#F4F1EC"; ctx.fill(); }
+    else { ctx.fillStyle = "rgba(244,241,236,.10)"; ctx.fill(); ctx.shadowBlur = 0; ctx.strokeStyle = "rgba(244,241,236,.45)"; ctx.lineWidth = 1.2; ctx.stroke(); }
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = k >= 1 ? "#0E1E3A" : "#F4F1EC";
+    ctx.font = `800 ${Math.round(T * 0.56)}px Inter,system-ui,sans-serif`;
+    ctx.fillText(tl.ch, 0, 1);
+    ctx.restore();
+  }
+  if (puzzle.p >= 1) {
+    const a = clamp01((5 - puzzle.hold) / 0.8);
+    const last = puzzle.tiles[puzzle.tiles.length - 1];
+    ctx.fillStyle = `rgba(244,241,236,${0.75 * a})`;
+    ctx.font = "700 11px Inter,system-ui,sans-serif";
+    if (ctx.letterSpacing !== undefined) ctx.letterSpacing = "2px";
+    ctx.fillText(puzzle.word.toUpperCase() === "LAAR DIGITAL" ? "STRATEGY INTO MOTION." : "LET'S MAKE IT MOVE.", w / 2, last.ty + T + 22);
+    if (ctx.letterSpacing !== undefined) ctx.letterSpacing = "0px";
+  }
+}
+
 root.addEventListener("click", (e) => {
   const t = e.target.closest("button");
   if (!t) return;
+  if (t.dataset.scene) { setScene(t.dataset.scene); track("scene", { scene: viz.scene }); return; }
   if (t.dataset.mode) {
     mode = t.dataset.mode;
     root.querySelectorAll("[data-mode]").forEach((b) => b.setAttribute("aria-pressed", String(b === t)));
@@ -403,6 +590,9 @@ function showPill(text) {
   $("pillText").textContent = text || (store.get("resume") ? "Continue with the guide" : "Talk to Laar");
   show(pill);
 }
+
+$("pick").hidden = !CFG.visualPicker;
+setScene(viz.scene);
 
 function setLiveMode(m) {
   live.classList.toggle("voice", m === "voice");
